@@ -1,0 +1,7 @@
+# DECISIONS.md
+
+1. **Indexes.** On `attendance_logs`: a unique `(emp_code, date)` (one record per day, race-safe punch-in, per-employee queries); `(date desc, emp_code)` (the list sort and month-range scans); `(status, date desc, emp_code)` (status filter); `(emp_code, punch_in desc)` (latest punch-in at punch-out). On `employees`: unique `emp_code`, `(department, emp_code)`, `(department, joined_on)` and `joined_on` (headcount). Rejected: copying `department` into every log (extra writes, goes stale) and an index on `late_minutes` (the leaderboard needs a month's rows anyway).
+2. **Punch-in race.** Both requests work out the same IST date and call `insert_one`. The unique `(emp_code, date)` index lets MongoDB accept exactly one; the other gets `DuplicateKeyError`, which I turn into 409. There is no read-then-write, so no gap to race through.
+3. **Ties.** Employees are ranked with `$rank` first and `limit` is applied afterwards (`rank <= limit`), so everyone tied at the cutoff is returned and the response can be longer than `limit`. Ties are ordered by `emp_code`.
+4. **Headcount.** The pipeline starts from `employees` (joined on or before month end) and attaches each one's logs with `$lookup`. An employee with no logs gets an empty array but is still a row, so is still counted.
+5. **100x data.** Pre-aggregate: keep per-employee-per-month and per-department-per-day rollups updated on every write, and shard `attendance_logs` by `emp_code`.
